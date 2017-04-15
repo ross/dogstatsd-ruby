@@ -90,7 +90,7 @@ module Datadog
       @socket = UDPSocket.new
       self.namespace = opts[:namespace]
       self.tags = opts[:tags]
-      @buffer = Array.new
+      @buffer = Hash.new
       self.max_buffer_size = max_buffer_size
       alias :send_stat :send_to_socket
     end
@@ -409,25 +409,32 @@ module Datadog
           join_array_to_str(full_stat, ts, COMMA)
         end
 
-        send_stat(full_stat)
+        host = ops[:host] || @host
+        port = ops[:port] || @port
+        send_stat(full_stat, host, port)
       end
     end
 
-    def send_to_buffer(message)
-      @buffer << message
-      if @buffer.length >= @max_buffer_size
+    def send_to_buffer(message, host=@host, port=@port)
+      key = [host, port]
+      @buffer[key] ||= Array.new
+      @buffer[key] << message
+      if @buffer[key].length >= @max_buffer_size
         flush_buffer
       end
     end
 
     def flush_buffer()
-      send_to_socket(@buffer.join(NEW_LINE))
-      @buffer = Array.new
+      @buffer.each do |key,metrics|
+        host, port = key
+        send_to_socket(metrics.join(NEW_LINE), host, port)
+      end
+      @buffer.clear
     end
 
-    def send_to_socket(message)
+    def send_to_socket(message, host=@host, port=@port)
       self.class.logger.debug { "Statsd: #{message}" } if self.class.logger
-      @socket.send(message, 0, @host, @port)
+      @socket.send(message, 0, host, port)
     rescue => boom
       self.class.logger.error { "Statsd: #{boom.class} #{boom}" } if self.class.logger
       nil
